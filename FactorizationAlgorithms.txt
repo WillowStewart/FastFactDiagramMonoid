@@ -1,0 +1,2497 @@
+LoadPackage("semigroups",false);
+
+#Generators
+SquareGenerator := function(n,imin,imax)
+  local list,i,ints;
+  list := [[]];
+  ints := [imin..imax];
+  for i in [1..n] do
+    if i in ints
+	  then Add(list[1],i);
+	    Add(list[1],-i);
+	else Add(list,[i,-i]);
+	fi;
+  od;
+  return Bipartition(list);
+end;
+
+DotGenerator := function(n,ints)
+  local list,i;
+  list := [];
+  for i in [1..n] do
+    if i in ints
+	  then Add(list,[i]);
+	    Add(list,[-i]);
+	else Add(list,[i,-i]);
+	fi;
+  od;
+  return Bipartition(list);
+end;
+
+SymGenerator := function(n,int)
+  local list,i;
+  list := [[int,-(int+1)],[-int,int+1]];
+  for i in [1..int-1] do
+    Add(list,[i,-i]);
+  od;
+  for i in [int+2..n] do
+    Add(list,[i,-i]);
+  od;
+  return Bipartition(list);
+end;
+
+CupGenerator := function(n,int)
+  local list,i;
+  list := [[int,int+1],[-int,-(int+1)]];
+  for i in [1..int-1] do
+    Add(list,[i,-i]);
+  od;
+  for i in [int+2..n] do 
+    Add(list,[i,-i]);
+  od;
+  return Bipartition(list);
+end;
+
+pRoLeft := function(n,i)
+  return SymGenerator(n,i)*DotGenerator(n,[i]);
+end;
+
+pRoRight := function(n,i)
+  return DotGenerator(n,[i])*SymGenerator(n,i);
+end;
+
+DiagramGenerators := function(n)
+  local syms,squares,prookleft,prookright,cups,dots,i;
+  syms := []*(n-1);
+  squares := []*(n-1);
+  prookleft := []*(n-1);
+  prookright := []*(n-1);
+  cups := []*(n-1);
+  dots := []*n;
+  for i in [1..(n-1)] do
+    squares[i] := SquareGenerator(n,i,i+1);
+    syms[i] := SymGenerator(n,i);
+    cups[i] := CupGenerator(n,i);
+    dots[i] := DotGenerator(n,[i]);
+    prookleft[i] := pRoLeft(n,i);
+    prookright[i] := pRoRight(n,i);
+  od;
+  dots[n] := DotGenerator(n,[n]);
+  return [cups,dots,syms,squares,prookleft,prookright];
+end;
+
+############################################################
+
+#Temperley-Lieb
+TLFact := function(bipartition) 
+  local factors,k,blocks,n,pair,midfactors,botfactors,oddfact,evenfact,topfact,botfact,i;
+  blocks := List(ExtRepOfObj(bipartition));
+  n := DegreeOfBipartition(bipartition);
+  factors := [];
+  midfactors := [];
+  topfact := [];
+  botfact := [];
+  botfactors := [];
+  for pair in blocks do
+    if pair[1] > 0 and pair[2] > 0 then 
+	  oddfact := [];
+	  evenfact := [];
+	  for i in [pair[1]..pair[2]-1] do
+		if (i mod 2) = (pair[1] mod 2) then
+		  Add(evenfact,CupGenerator(n,i));
+		elif (i mod 2) <> (pair[1] mod 2) then
+		  Add(oddfact,CupGenerator(n,i));
+		fi;
+	  od;
+	  Append(factors,oddfact);
+	  Append(factors,evenfact);
+	elif pair[1] > 0 and pair[2] < 0 then
+	  if pair[1] <> -pair[2] then
+		oddfact := [];
+	    evenfact := [];
+		if pair[1] > -pair[2] then
+	      for i in [-pair[2]..pair[1]-1] do
+		    if (i mod 2) = (pair[1] mod 2) then
+		      Add(evenfact,CupGenerator(n,i));
+		    elif (i mod 2) <> (pair[1] mod 2) then
+		      Add(oddfact,CupGenerator(n,i));
+		    fi;
+	      od;
+		  Append(botfact,evenfact);
+		  Append(botfact,oddfact);
+		elif pair[1] < -pair[2] then
+		  for i in [pair[1]..-pair[2]-1] do
+		    if (i mod 2) = (pair[1] mod 2) then
+		      Add(evenfact,CupGenerator(n,i));
+		    elif (i mod 2) <> (pair[1] mod 2) then
+		      Add(oddfact,CupGenerator(n,i));
+		    fi;
+	      od;
+		  Append(topfact,evenfact);
+		  Append(topfact,oddfact);
+		fi;
+	  fi;
+	else
+	  oddfact := [];
+	  evenfact := [];
+	  for i in [-pair[1]..-pair[2]-1] do
+		if (i mod 2) = (-pair[1] mod 2) then
+		  Add(evenfact,CupGenerator(n,i));
+		elif (i mod 2) <> (-pair[1] mod 2) then
+		  Add(oddfact,CupGenerator(n,i));
+		fi;
+	  od;
+	  Append(botfactors,evenfact);
+	  Append(botfactors,oddfact);
+	fi;
+  od;
+  factors := Reversed(factors);
+  Append(factors,Reversed(topfact));
+  Append(factors,botfact);
+  Append(factors,botfactors);
+  return factors;
+end;
+
+#randomly choose a vertex to pair with the first vertex, splitting diagram in two 
+#recursively sample random diagrams within each 
+TLRandom := function(n)
+    local Catalan,SampleMatching,BoundaryVertex,matching,blocks;
+
+    Catalan := function(m)
+        return Binomial(2 * m, m) / (m + 1);
+    end;
+
+	#boundary positions are offset+1, ..., offset+2*m.
+    SampleMatching := function(m, offset)
+        local weights,total,r,partial,k,result;
+
+        if m = 0 then
+            return [];
+        fi;
+
+        # If the first point is paired with point 2*k+2,
+        # there are Catalan(k) choices inside and
+        # Catalan(m-1-k) choices outside.
+        weights := List(
+            [0 .. m - 1],
+            k -> Catalan(k) * Catalan(m - 1 - k)
+        );
+
+        total := Sum(weights);
+		r := Random(1,total);
+
+        partial := 0;
+        for k in [0 .. m - 1] do
+            partial := partial + weights[k + 1];
+
+            if r <= partial then
+                result := [[offset + 1, offset + 2 * k + 2]];
+
+                Append(
+                    result,
+                    SampleMatching(k, offset + 1)
+                );
+
+                Append(
+                    result,
+                    SampleMatching(
+                        m - 1 - k,
+                        offset + 2 * k + 2
+                    )
+                );
+
+                return result;
+            fi;
+        od;
+    end;
+
+    matching := SampleMatching(n, 0);
+
+    # Boundary positions are ordered as
+    #
+    #   1, 2, ..., n, -n, -(n-1), ..., -1.
+    #
+    # Thus boundary position p > n corresponds to
+    # the bottom vertex -(2*n-p+1).
+    BoundaryVertex := function(p)
+        if p <= n then
+            return p;
+        else
+            return -(2 * n - p + 1);
+        fi;
+    end;
+
+    blocks := List(
+        matching,
+        pair -> List(pair, BoundaryVertex)
+    );
+
+    return Bipartition(blocks);
+end;
+
+TimeTLFact := function(n,runs)
+  local factors,k,blocks,pair,botfactors,oddfact,evenfact,topfact,botfact,i,a,times,t1,t2,cups,bipartition;
+  cups := []*(n-1);
+  for i in [1..(n-1)] do
+    cups[i] := CupGenerator(n,i);
+  od;
+  
+  times := [];
+  for a in [1..runs] do 
+  bipartition := TLRandom(n);
+  t1 := Runtime();
+  blocks := List(ExtRepOfObj(bipartition));
+  factors := [];
+  topfact := [];
+  botfact := [];
+  botfactors := [];
+  for pair in blocks do
+    if pair[1] > 0 and pair[2] > 0 then 
+	  oddfact := [];
+	  evenfact := [];
+	  for i in [pair[1]..pair[2]-1] do
+		if (i mod 2) = (pair[1] mod 2) then
+		  Add(evenfact,cups[i]);
+		elif (i mod 2) <> (pair[1] mod 2) then
+		  Add(oddfact,cups[i]);
+		fi;
+	  od;
+	  Append(factors,oddfact);
+	  Append(factors,evenfact);
+	elif pair[1] > 0 and pair[2] < 0 then
+	  if pair[1] <> -pair[2] then
+		oddfact := [];
+	    evenfact := [];
+		if pair[1] > -pair[2] then
+	      for i in [-pair[2]..pair[1]-1] do
+		    if (i mod 2) = (pair[1] mod 2) then
+		      Add(evenfact,cups[i]);
+		    elif (i mod 2) <> (pair[1] mod 2) then
+		      Add(oddfact,cups[i]);
+		    fi;
+	      od;
+		  Append(botfact,evenfact);
+		  Append(botfact,oddfact);
+		elif pair[1] < -pair[2] then
+		  for i in [pair[1]..-pair[2]-1] do
+		    if (i mod 2) = (pair[1] mod 2) then
+		      Add(evenfact,cups[i]);
+		    elif (i mod 2) <> (pair[1] mod 2) then
+		      Add(oddfact,cups[i]);
+		    fi;
+	      od;
+		  Append(topfact,evenfact);
+		  Append(topfact,oddfact);
+		fi;
+	  fi;
+	else
+	  oddfact := [];
+	  evenfact := [];
+	  for i in [-pair[1]..-pair[2]-1] do
+		if (i mod 2) = (-pair[1] mod 2) then
+		  Add(evenfact,cups[i]);
+		elif (i mod 2) <> (-pair[1] mod 2) then
+		  Add(oddfact,cups[i]);
+		fi;
+	  od;
+	  Append(botfactors,evenfact);
+	  Append(botfactors,oddfact);
+	fi;
+  od;
+  factors := Reversed(factors);
+  Append(factors,Reversed(topfact));
+  Append(factors,botfact);
+  Append(factors,botfactors);
+  t2 := Runtime();
+  Add(times,t2-t1);
+  od;
+  return Float(Sum(times)/runs);
+end;
+
+############################################################
+
+#planar rook
+pRoMonoid := function(n)
+  local gens;
+  gens := [];
+  Append(gens,List([1..(n-1)],i->pRoLeft(n,i)));
+  Append(gens,List([1..(n-1)],i->pRoRight(n,i)));
+  return Monoid(gens);
+end;
+
+pRoFact := function(bipartition)
+  local factors,k,blocks,n,pair,botfactors,oddfact,evenfact,topfact,botfact,i;
+  blocks := List(ExtRepOfObj(bipartition));
+  n := DegreeOfBipartition(bipartition);
+  factors := [];
+  topfact := [];
+  botfact := [];
+  botfactors := [];
+  for pair in blocks do
+    if Size(pair) = 1 then 
+	  if pair[1] > 0 then
+	    if pair[1] = n then
+		  Add(factors,pRoLeft(n,n-1));
+		  Add(factors,pRoRight(n,n-1));
+		else
+		  Add(factors,pRoRight(n,pair[1]));
+		  Add(factors,pRoLeft(n,pair[1]));
+		fi;
+	  else 
+	    if pair[1] = -n then
+		  Add(botfactors,pRoLeft(n,n-1));
+		  Add(botfactors,pRoRight(n,n-1));
+		else 
+		  Add(botfactors,pRoRight(n,-pair[1]));
+		  Add(botfactors,pRoLeft(n,-pair[1]));
+	    fi;
+	  fi;
+	else
+	  if pair[1] <> -pair[2] then
+		oddfact := [];
+		if pair[1] > -pair[2] then
+	      for i in [-pair[2]..pair[1]-1] do
+		    Add(oddfact,pRoRight(n,i));
+	      od;
+		  Append(botfact,Reversed(oddfact));
+		elif pair[1] < -pair[2] then
+		  for i in [pair[1]..-pair[2]-1] do
+		    Add(oddfact,pRoLeft(n,i));
+	      od;
+		  Append(topfact,Reversed(oddfact));
+		fi;
+	  fi;
+	fi;
+  od;
+  Append(factors,Reversed(topfact));
+  Append(factors,botfact);
+  Append(factors,botfactors);
+  return factors;
+end;
+
+#randomly choose top/bottom half diagram with fixed number of through strands k
+pRoRandomk := function(n,k)
+  local r,subset,next,remaining,count;
+  if k = 0 then
+    return [];
+  fi;
+
+  r := Random(1, Binomial(n,k));
+  subset := [];
+  next := 1;
+  remaining := k;
+
+  while remaining > 0 do
+    #number of subsets whose next selected entry is 'next'.
+    count := Binomial(n - next, remaining - 1);
+    if r <= count then
+      Add(subset, next);
+      remaining := remaining - 1;
+    else
+      r := r - count;
+    fi;
+	next := next + 1;
+  od;
+  return subset;
+end;
+
+pRoRandom := function(n)
+  local total,r,k,numberOfRankK,top,bottom,usedTop,usedBottom,blocks,i;
+
+  # |pRo(n)| = Sum_{k=0}^n Binomial(n,k)^2 = Binomial(2*n,n).
+  total := Binomial(2 * n, n);
+  
+  #randomly choose nubmer of through strands with probability Binomial(n,k)^2 / Binomial(2*n,n).
+  r := Random(1, total);
+  k := 0;
+  numberOfRankK := Binomial(n, k)^2;
+
+  while r > numberOfRankK do
+      r := r - numberOfRankK;
+      k := k + 1;
+      numberOfRankK := Binomial(n, k)^2;
+  od;
+
+  #conditional on rank k, choose the top and bottom k-subsets
+  #independently and uniformly.
+  top := pRoRandomk(n, k);
+  bottom := pRoRandomk(n, k);
+
+  usedTop := BlistList([1..n], top);
+  usedBottom := BlistList([1..n], bottom);
+
+  blocks := [];
+
+  #join selected vertices in increasing order
+  for i in [1..k] do
+    Add(blocks, [top[i], -bottom[i]]);
+  od;
+
+    #every unused top or bottom vertex is an isolated singleton
+  for i in [1..n] do
+    if not usedTop[i] then
+      Add(blocks, [i]);
+    fi;
+      if not usedBottom[i] then
+        Add(blocks, [-i]);
+      fi;
+  od;
+  return Bipartition(blocks);
+end;
+
+TimepRoFact := function(n,runs)
+local factors,k,blocks,pair,botfactors,oddfact,evenfact,topfact,botfact,i,a,times,t1,t2,prookleft,prookright,bipartition;
+  prookleft := []*(n-1);
+  prookright := []*(n-1);
+  for i in [1..(n-1)] do
+    prookleft[i] := pRoLeft(n,i);
+    prookright[i] := pRoRight(n,i);
+  od;
+  
+  times := [];
+  for a in [1..runs] do 
+  bipartition := pRoRandom(n);
+  t1 := Runtime();
+  blocks := List(ExtRepOfObj(bipartition));
+  factors := [];
+  topfact := [];
+  botfact := [];
+  botfactors := [];
+  for pair in blocks do
+    if Size(pair) = 1 then 
+	  if pair[1] > 0 then
+	    if pair[1] = n then
+		  Add(factors,prookleft[n-1]);
+		  Add(factors,prookright[n-1]);
+		else
+		  Add(factors,prookright[pair[1]]);
+		  Add(factors,prookleft[pair[1]]);
+		fi;
+	  else 
+	    if pair[1] = -n then
+		  Add(botfactors,prookleft[n-1]);
+		  Add(botfactors,prookright[n-1]);
+		else 
+		  Add(botfactors,prookright[-pair[1]]);
+		  Add(botfactors,prookleft[-pair[1]]);
+	    fi;
+	  fi;
+	else
+	  if pair[1] <> -pair[2] then
+		oddfact := [];
+		if pair[1] > -pair[2] then
+	      for i in [-pair[2]..pair[1]-1] do
+		    Add(oddfact,prookright[i]);
+	      od;
+		  Append(botfact,Reversed(oddfact));
+		elif pair[1] < -pair[2] then
+		  for i in [pair[1]..-pair[2]-1] do
+		    Add(oddfact,prookleft[i]);
+	      od;
+		  Append(topfact,Reversed(oddfact));
+		fi;
+	  fi;
+	fi;
+  od;
+  Append(factors,Reversed(topfact));
+  Append(factors,botfact);
+  Append(factors,botfactors);
+  t2 := Runtime();
+  Add(times,t2-t1);
+  od;
+  return Float(Sum(times)/runs);
+end;
+
+############################################################
+
+#Motzkin
+MoFact := function(bipartition)
+  local factors,k,blocks,n,pair,midfactors,botfactors,oddfact,evenfact,topfact,botfactdot,topfactdot,botfact,i;
+  blocks := List(ExtRepOfObj(bipartition));
+  n := DegreeOfBipartition(bipartition);
+  factors := [];
+  midfactors := [];
+  topfact := [];
+  botfact := [];
+  botfactors := [];
+  botfactdot := [];
+  topfactdot := [];
+  for pair in blocks do
+    if Size(pair) = 1 then
+	  if pair[1] > 0 then
+		if pair[1] = n then
+		  Add(topfactdot,pRoLeft(n,n-1));
+		  Add(topfactdot,pRoRight(n,n-1));
+		else
+		  Add(topfactdot,pRoRight(n,pair[1]));
+		  Add(topfactdot,pRoLeft(n,pair[1]));
+		fi;
+	  elif pair[1] < 0 then
+		if pair[1] = -n then
+		  Add(botfactdot,pRoLeft(n,n-1));
+		  Add(botfactdot,pRoRight(n,n-1));
+		else 
+		  Add(botfactdot,pRoRight(n,-pair[1]));
+		  Add(botfactdot,pRoLeft(n,-pair[1]));
+	    fi;
+	  fi;
+	else 
+    if pair[1] > 0 and pair[2] > 0 then 
+	  if (pair[1] mod 2) <> (pair[2] mod 2) then
+	  oddfact := [];
+	  evenfact := [];
+	  for i in [pair[1]..pair[2]-1] do
+		if (i mod 2) = (pair[1] mod 2) then
+		  Add(evenfact,CupGenerator(n,i));
+		elif (i mod 2) <> (pair[1] mod 2) then
+		  Add(oddfact,CupGenerator(n,i));
+		fi;
+	  od;
+	  Append(factors,evenfact);
+	  Append(factors,oddfact);
+	  else 
+	  oddfact := [];
+	  evenfact := [];
+	  for i in [pair[1]..pair[2]-2] do
+		if (i mod 2) = (pair[1] mod 2) then
+		  Add(evenfact,CupGenerator(n,i));
+		elif (i mod 2) <> (pair[1] mod 2) then
+		  Add(oddfact,CupGenerator(n,i));
+		fi;
+	  od;
+	  Append(factors,evenfact);
+	  Append(factors,oddfact);
+	  Add(factors,pRoRight(n,pair[2]-1)); 
+	  fi;
+	elif pair[1] > 0 and pair[2] < 0 then 
+	  if pair[1] <> -pair[2] then
+		oddfact := [];
+		if pair[1] > -pair[2] then
+	      for i in [-pair[2]..pair[1]-1] do
+		    Add(oddfact,pRoRight(n,i));
+	      od;
+		  Append(botfact,Reversed(oddfact));
+		elif pair[1] < -pair[2] then
+		  for i in [pair[1]..-pair[2]-1] do
+		    Add(oddfact,pRoLeft(n,i));
+	      od;
+		  Append(topfact,Reversed(oddfact));
+		fi;
+	  fi;
+	else
+	  if (pair[1] mod 2) <> (pair[2] mod 2) then
+	  oddfact := [];
+	  evenfact := [];
+	  for i in [-pair[1]..-pair[2]-1] do
+		if (i mod 2) = (-pair[1] mod 2) then
+		  Add(evenfact,CupGenerator(n,i));
+		elif (i mod 2) <> (-pair[1] mod 2) then
+		  Add(oddfact,CupGenerator(n,i));
+		fi;
+	  od;
+	  Append(botfactors,evenfact);
+	  Append(botfactors,oddfact);
+	  else  
+	  oddfact := [];
+	  evenfact := [];
+	  for i in [-pair[1]..-pair[2]-2] do
+		if (i mod 2) = (pair[1] mod 2) then
+		  Add(evenfact,CupGenerator(n,i));
+		elif (i mod 2) <> (pair[1] mod 2) then
+		  Add(oddfact,CupGenerator(n,i));
+		fi;
+	  od;
+	  Append(botfactors,evenfact);
+	  Append(botfactors,oddfact);
+	  Add(botfactors,pRoLeft(n,-pair[2]-1));
+	  fi;
+	fi;
+	fi;
+  od;
+  factors := Reversed(factors);
+  Append(topfactdot,factors);
+  Append(topfactdot,Reversed(topfact));
+  Append(topfactdot,botfact);
+  Append(topfactdot,botfactors);
+  Append(topfactdot,botfactdot);
+  return topfactdot; 
+end;
+
+# Return i with probability weights[i] / Sum(weights).
+RandomWeightedPosition := function(weights)
+  local total,r,i;
+  total := Sum(weights);
+  r := Random(1,total);
+  for i in [1 .. Size(weights)] do
+    if r <= weights[i] then
+      return i;
+    fi;
+    r := r - weights[i];
+  od;
+end;
+
+MoRandom := function(n)
+  local points,N,M,m,worker;
+  points := Concatenation([1 .. n], [-n .. -1]);
+  N := Size(points);
+  
+  #M[m + 1] is the m-th Motzkin number.
+  M := List([0 .. N], x -> 0);
+  M[1] := 1;
+  for m in [1 .. N] do
+    M[m + 1] := M[m];
+	if m >= 2 then
+	  M[m+1] := M[m+1] + Sum([2 .. m],j -> M[j-1]*M[m-j+1]);
+	fi;
+  od;
+
+  worker := function(L)
+    local len,choices,weights,choice,j,left,right;
+	  len := Size(L);
+	  if len = 0 then
+	    return [];
+	  fi;
+
+      #choice 1 means singleton.
+      #choice j means pair L[1] with L[j].
+      choices := [1 .. len];
+	  weights := [M[len]];
+	  if len >= 2 then
+	    Append(weights,List([2 .. len],j -> M[j-1]*M[len-j+1]));
+      fi;
+
+      choice := RandomWeightedPosition(weights);
+	  if choice = 1 then
+	    return Concatenation([[L[1]]],worker(L{[2 .. len]}));
+      fi;
+	  j := choice;
+	  left := worker(L{[2 .. j - 1]});
+	  right := worker(L{[j + 1 .. len]});
+	  return Concatenation([[L[1],L[j]]],left,right);
+    end;
+
+  return Bipartition(worker(ShallowCopy(points)));
+end;
+
+TimeMoFact := function(n,runs)
+local factors,k,blocks,pair,midfactors,botfactors,oddfact,evenfact,topfact,botfactdot,topfactdot,botfact,i,a,times,t1,t2,cups,prookleft,bipartition,prookright;
+  cups := []*(n-1);
+  prookleft := []*(n-1);
+  prookright := []*(n-1);
+  for i in [1..(n-1)] do
+    cups[i] := CupGenerator(n,i);
+    prookleft[i] := pRoLeft(n,i);
+    prookright[i] := pRoRight(n,i);
+  od;
+  
+  times := [];
+  for a in [1..runs] do 
+  bipartition := MoRandom(n);
+  t1 := Runtime();
+  blocks := List(ExtRepOfObj(bipartition));
+  factors := [];
+  midfactors := [];
+  topfact := [];
+  botfact := [];
+  botfactors := [];
+  botfactdot := [];
+  topfactdot := [];
+  for pair in blocks do
+    if Size(pair) = 1 then
+	  if pair[1] > 0 then
+		if pair[1] = n then
+		  Add(topfactdot,prookleft[n-1]);
+		  Add(topfactdot,prookright[n-1]);
+		else
+		  Add(topfactdot,prookright[pair[1]]);
+		  Add(topfactdot,prookleft[pair[1]]);
+		fi;
+	  elif pair[1] < 0 then
+		if pair[1] = -n then
+		  Add(botfactdot,prookleft[n-1]);
+		  Add(botfactdot,prookright[n-1]);
+		else 
+		  Add(botfactdot,prookright[-pair[1]]);
+		  Add(botfactdot,prookleft[-pair[1]]);
+	    fi;
+	  fi;
+	else 
+    if pair[1] > 0 and pair[2] > 0 then 
+	  if (pair[1] mod 2) <> (pair[2] mod 2) then
+	  oddfact := [];
+	  evenfact := [];
+	  for i in [pair[1]..pair[2]-1] do
+		if (i mod 2) = (pair[1] mod 2) then
+		  Add(evenfact,cups[i]);
+		elif (i mod 2) <> (pair[1] mod 2) then
+		  Add(oddfact,cups[i]);
+		fi;
+	  od;
+	  Append(factors,evenfact);
+	  Append(factors,oddfact);
+	  else 
+	  oddfact := [];
+	  evenfact := [];
+	  for i in [pair[1]..pair[2]-2] do
+		if (i mod 2) = (pair[1] mod 2) then
+		  Add(evenfact,cups[i]);
+		elif (i mod 2) <> (pair[1] mod 2) then
+		  Add(oddfact,cups[i]);
+		fi;
+	  od;
+	  Append(factors,evenfact);
+	  Append(factors,oddfact);
+	  Add(factors,prookright[pair[2]-1]); 
+	  fi;
+	elif pair[1] > 0 and pair[2] < 0 then 
+	  if pair[1] <> -pair[2] then
+		oddfact := [];
+		if pair[1] > -pair[2] then
+	      for i in [-pair[2]..pair[1]-1] do
+		    Add(oddfact,prookright[i]);
+	      od;
+		  Append(botfact,Reversed(oddfact));
+		elif pair[1] < -pair[2] then
+		  for i in [pair[1]..-pair[2]-1] do
+		    Add(oddfact,prookleft[i]);
+	      od;
+		  Append(topfact,Reversed(oddfact));
+		fi;
+	  fi;
+	else
+	  if (pair[1] mod 2) <> (pair[2] mod 2) then
+	  oddfact := [];
+	  evenfact := [];
+	  for i in [-pair[1]..-pair[2]-1] do
+		if (i mod 2) = (-pair[1] mod 2) then
+		  Add(evenfact,cups[i]);
+		elif (i mod 2) <> (-pair[1] mod 2) then
+		  Add(oddfact,cups[i]);
+		fi;
+	  od;
+	  Append(botfactors,evenfact);
+	  Append(botfactors,oddfact);
+	  else  
+	  oddfact := [];
+	  evenfact := [];
+	  for i in [-pair[1]..-pair[2]-2] do
+		if (i mod 2) = (pair[1] mod 2) then
+		  Add(evenfact,cups[i]);
+		elif (i mod 2) <> (pair[1] mod 2) then
+		  Add(oddfact,cups[i]);
+		fi;
+	  od;
+	  Append(botfactors,evenfact);
+	  Append(botfactors,oddfact);
+	  Add(botfactors,prookleft[-pair[2]-1]);
+	  fi;
+	fi;
+	fi;
+  od;
+  factors := Reversed(factors);
+  Append(topfactdot,factors);
+  Append(topfactdot,Reversed(topfact));
+  Append(topfactdot,botfact);
+  Append(topfactdot,botfactors);
+  Append(topfactdot,botfactdot);
+  t2 := Runtime();
+  Add(times,t2-t1);
+  od;
+  return Float(Sum(times)/runs);
+end;
+
+############################################################
+
+#planar partition
+AllPositive := function(list)
+  local i;
+  for i in list do
+	if i < 0
+	  then return false;
+	fi;
+  od;
+  return true;
+end;
+
+AllNegative := function(list)
+  local i;
+  for i in list do
+	if i > 0
+	  then return false;
+	fi;
+  od;
+  return true;
+end;
+
+#convert pPa diagram to TL diagram
+pPatoTL := function(bipartition)
+  local blocks,i,n,x,block,pos,neg;
+  blocks := List(ExtRepOfObj(bipartition));
+  n := DegreeOfBipartition(bipartition);
+  for i in [1..Size(blocks)] do
+    blocks[i] := 2*blocks[i];
+  od;
+  x := [];
+  for block in blocks do 
+    if Size(block) = 1 then
+	  if block[1] > 0 then
+	    Add(x,[block[1]-1,block[1]]);
+	  else 
+	    Add(x,[block[1]+1,block[1]]);
+	  fi;
+	else 
+	  if AllPositive(block) then
+	    Add(x,[Minimum(block)-1,Maximum(block)]);
+	    for i in [1..Size(block)-1] do
+		  Add(x,[block[i],block[i+1]-1]);
+		od;
+	  elif AllNegative(block) then
+	    Add(x,[Maximum(block)+1,Minimum(block)]);
+		for i in [1..Size(block)-1] do
+		  Add(x,[block[i],block[i+1]+1]);
+		od;
+	  else 
+	    pos := [];
+		neg := [];
+	    for i in block do
+		  if i > 0 then
+		    Add(pos,i);
+		  else 
+		    Add(neg,i);
+		  fi;
+		od;
+		Add(x,[Minimum(pos)-1,Maximum(neg)+1]);
+		Add(x,[Maximum(pos),Minimum(neg)]);
+		for i in [1..Size(pos)-1] do
+		  Add(x,[pos[i],pos[i+1]-1]);
+		od;
+		for i in [1..Size(neg)-1] do
+		  Add(x,[neg[i],neg[i+1]+1]);
+		od;
+	  fi;
+	fi;
+  od;
+  return Bipartition(x);
+end;
+
+#convert TL diagram to pPa diagram
+TLtopPa := function(bipartition)
+  local blocks,degree,n,nrverts,partner,visited,ToIndex,TopPaVertex,FixedPartner,block,a,b,i,v,w,pblock,result;
+  blocks := ExtRepOfObj(bipartition);
+  degree := DegreeOfBipartition(bipartition);
+  n := degree / 2;
+  nrverts := 4 * n;
+  
+  #convert to one line
+  #i  -> i
+  #-i  -> 2n+i
+  ToIndex := function(x)
+    if x > 0 then
+      return x;
+    else
+      return 2 * n - x;
+    fi;
+  end;
+
+  #contract TL vertex to the corresponding pPa vertex:
+  #2i-1, 2i -> i
+  #-(2i-1), -2i    -> -i
+  TopPaVertex := function(index)
+    if index <= 2 * n then
+      return QuoInt(index + 1, 2);
+    else
+      return -QuoInt(index - 2 * n + 1, 2);
+    fi;
+  end;
+
+  #pair TL vertices: 1 with 2, 3 with 4, ...
+  FixedPartner := function(index)
+    if index mod 2 = 1 then
+      return index + 1;
+    else
+      return index - 1;
+    fi;
+  end;
+
+  # partner[v] is the other endpoint of the TL string containing vertex v
+  partner := ListWithIdenticalEntries(nrverts, 0);
+  
+  #sort
+  for block in blocks do
+    a := ToIndex(block[1]);
+    b := ToIndex(block[2]);
+    partner[a] := b;
+    partner[b] := a;
+  od;
+
+  visited := ListWithIdenticalEntries(nrverts, false);
+  result := [];
+
+  for i in [1 .. nrverts] do
+    if not visited[i] then
+      pblock := [];
+      v := i;
+	  
+	  #run over all vertices that end up in the same connected component in the pPa diagram
+      repeat
+        # v and w are the two TL points that contract to one vertex of the planar partition diagram
+        w := FixedPartner(v);
+        visited[v] := true;
+        visited[w] := true;
+        Add(pblock, TopPaVertex(v));
+        #follow the TL edge from the fixed partner
+        v := partner[w];
+      until visited[v];
+
+      Add(result, pblock);
+    fi;
+  od;
+  return Bipartition(result);
+end;
+
+pPaFact := function(bipartition)
+  local blocks,n,x,block,pos,neg,factors,fact,factors2,newblocks,k,id,pair,midfactors,botfactors,oddfact,evenfact,topfact,botfact,i;
+  blocks := List(ExtRepOfObj(bipartition));
+  n := DegreeOfBipartition(bipartition);
+  for i in [1..Size(blocks)] do
+    blocks[i] := 2*blocks[i];
+  od;
+  x := [];
+  for block in blocks do 
+    if Size(block) = 1 then
+	  if block[1] > 0 then
+	    Add(x,[block[1]-1,block[1]]);
+	  else 
+	    Add(x,[block[1]+1,block[1]]);
+	  fi;
+	else 
+	  if AllPositive(block) then
+	    Add(x,[Minimum(block)-1,Maximum(block)]);
+	    for i in [1..Size(block)-1] do
+		  Add(x,[block[i],block[i+1]-1]);
+		od;
+	  elif AllNegative(block) then
+	    Add(x,[Maximum(block)+1,Minimum(block)]);
+		for i in [1..Size(block)-1] do
+		  Add(x,[block[i],block[i+1]+1]);
+		od;
+	  else 
+	    pos := [];
+		neg := [];
+	    for i in block do
+		  if i > 0 then
+		    Add(pos,i);
+		  else 
+		    Add(neg,i);
+		  fi;
+		od;
+		Add(x,[Minimum(pos)-1,Maximum(neg)+1]);
+		Add(x,[Maximum(pos),Minimum(neg)]);
+		for i in [1..Size(pos)-1] do
+		  Add(x,[pos[i],pos[i+1]-1]);
+		od;
+		for i in [1..Size(neg)-1] do
+		  Add(x,[neg[i],neg[i+1]+1]);
+		od;
+	  fi;
+	fi;
+  od;
+  newblocks := x;
+  factors := [];
+  midfactors := [];
+  topfact := [];
+  botfact := [];
+  botfactors := [];
+  for pair in newblocks do
+    if pair[1] > 0 and pair[2] > 0 then 
+	  oddfact := [];
+	  evenfact := [];
+	  for i in [pair[1]..pair[2]-1] do
+		if (i mod 2) = (pair[1] mod 2) then
+		  if (i mod 2) = 1 then 
+		    Add(evenfact,DotGenerator(n,[(i+1)/2]));
+		  else 
+			Add(evenfact,SquareGenerator(n,i/2,i/2+1));
+		  fi;
+		elif (i mod 2) <> (pair[1] mod 2) then
+		  if (i mod 2) = 1 then 
+		    Add(oddfact,DotGenerator(n,[(i+1)/2]));
+		  else 
+			Add(oddfact,SquareGenerator(n,i/2,i/2+1));
+		  fi;
+		fi;
+	  od;
+	  Append(factors,oddfact);
+	  Append(factors,evenfact);
+	elif pair[1] > 0 and pair[2] < 0 then
+	  if pair[1] <> -pair[2] then
+		oddfact := [];
+	    evenfact := [];
+		if pair[1] > -pair[2] then
+	      for i in [-pair[2]..pair[1]-1] do
+		    if (i mod 2) = (pair[1] mod 2) then
+			  if (i mod 2) = 1 then 
+		        Add(evenfact,DotGenerator(n,[(i+1)/2]));
+			  else 
+			    Add(evenfact,SquareGenerator(n,i/2,i/2+1));
+			  fi;
+		    elif (i mod 2) <> (pair[1] mod 2) then
+			  if (i mod 2) = 1 then 
+				Add(oddfact,DotGenerator(n,[(i+1)/2]));
+			  else 
+				Add(oddfact,SquareGenerator(n,i/2,i/2+1));
+			  fi;
+		    fi;
+	      od;
+		  Append(botfact,evenfact);
+		  Append(botfact,oddfact);
+		elif pair[1] < -pair[2] then
+		  for i in [pair[1]..-pair[2]-1] do
+		    if (i mod 2) = (pair[1] mod 2) then
+			  if (i mod 2) = 1 then 
+				Add(evenfact,DotGenerator(n,[(i+1)/2]));
+			  else 
+				Add(evenfact,SquareGenerator(n,i/2,i/2+1));
+			  fi;
+		    elif (i mod 2) <> (pair[1] mod 2) then
+			  if (i mod 2) = 1 then 
+		        Add(oddfact,DotGenerator(n,[(i+1)/2]));
+			  else 
+				Add(oddfact,SquareGenerator(n,i/2,i/2+1));
+			  fi;
+		    fi;
+	      od;
+		  Append(topfact,evenfact);
+		  Append(topfact,oddfact);
+		fi;
+	  fi;
+	else
+	  oddfact := [];
+	  evenfact := [];
+	  for i in [-pair[1]..-pair[2]-1] do
+		if (i mod 2) = (-pair[1] mod 2) then
+		  if (i mod 2) = 1 then 
+			Add(evenfact,DotGenerator(n,[(i+1)/2]));
+		  else 
+			Add(evenfact,SquareGenerator(n,i/2,i/2+1));
+		  fi;
+		elif (i mod 2) <> (-pair[1] mod 2) then
+		  if (i mod 2) = 1 then 
+		    Add(oddfact,DotGenerator(n,[(i+1)/2]));
+		  else 
+			Add(oddfact,SquareGenerator(n,i/2,i/2+1));
+		  fi;
+		fi;
+	  od;
+	  Append(botfactors,evenfact);
+	  Append(botfactors,oddfact);
+	fi;
+  od;
+  factors := Reversed(factors);
+  Append(factors,Reversed(topfact));
+  Append(factors,botfact);
+  Append(factors,botfactors);
+  return factors;
+end;
+
+pPaRandom := function(n)
+  local bipartition;
+  bipartition := TLRandom(2*n);
+  return TLtopPa(bipartition);
+end;
+
+TimepPaFact := function(n,runs)
+  local factors,k,blocks,pair,midfactors,botfactors,oddfact,evenfact,topfact,botfactdot,topfactdot,botfact,pos,x,i,a,times,t1,t2,squares,dots,bipartition,neg,newblocks,block;
+  squares := []*(n-1);
+  dots := []*n;
+  for i in [1..(n-1)] do
+    squares[i] := SquareGenerator(n,i,i+1);
+    dots[i] := DotGenerator(n,[i]);
+  od;
+  dots[n] := DotGenerator(n,[n]);
+  
+  times := [];
+  for a in [1..runs] do
+  bipartition := pPaRandom(n);
+  t1 := Runtime();
+  blocks := List(ExtRepOfObj(bipartition));
+  for i in [1..Size(blocks)] do
+    blocks[i] := 2*blocks[i];
+  od;
+  x := [];
+  for block in blocks do 
+    if Size(block) = 1 then
+	  if block[1] > 0 then
+	    Add(x,[block[1]-1,block[1]]);
+	  else 
+	    Add(x,[block[1]+1,block[1]]);
+	  fi;
+	else 
+	  if AllPositive(block) then
+	    Add(x,[Minimum(block)-1,Maximum(block)]);
+	    for i in [1..Size(block)-1] do
+		  Add(x,[block[i],block[i+1]-1]);
+		od;
+	  elif AllNegative(block) then
+	    Add(x,[Maximum(block)+1,Minimum(block)]);
+		for i in [1..Size(block)-1] do
+		  Add(x,[block[i],block[i+1]+1]);
+		od;
+	  else 
+	    pos := [];
+		neg := [];
+	    for i in block do
+		  if i > 0 then
+		    Add(pos,i);
+		  else 
+		    Add(neg,i);
+		  fi;
+		od;
+		Add(x,[Minimum(pos)-1,Maximum(neg)+1]);
+		Add(x,[Maximum(pos),Minimum(neg)]);
+		for i in [1..Size(pos)-1] do
+		  Add(x,[pos[i],pos[i+1]-1]);
+		od;
+		for i in [1..Size(neg)-1] do
+		  Add(x,[neg[i],neg[i+1]+1]);
+		od;
+	  fi;
+	fi;
+  od;
+  newblocks := x;
+  factors := [];
+  midfactors := [];
+  topfact := [];
+  botfact := [];
+  botfactors := [];
+  for pair in newblocks do
+    if pair[1] > 0 and pair[2] > 0 then 
+	  oddfact := [];
+	  evenfact := [];
+	  for i in [pair[1]..pair[2]-1] do
+		if (i mod 2) = (pair[1] mod 2) then
+		  if (i mod 2) = 1 then 
+		    Add(evenfact,dots[(i+1)/2]);
+		  else 
+			Add(evenfact,squares[i/2]);
+		  fi;
+		elif (i mod 2) <> (pair[1] mod 2) then
+		  if (i mod 2) = 1 then 
+		    Add(oddfact,dots[(i+1)/2]);
+		  else 
+			Add(oddfact,squares[i/2]);
+		  fi;
+		fi;
+	  od;
+	  Append(factors,oddfact);
+	  Append(factors,evenfact);
+	elif pair[1] > 0 and pair[2] < 0 then
+	  if pair[1] <> -pair[2] then
+		oddfact := [];
+	    evenfact := [];
+		if pair[1] > -pair[2] then
+	      for i in [-pair[2]..pair[1]-1] do
+		    if (i mod 2) = (pair[1] mod 2) then
+			  if (i mod 2) = 1 then 
+		        Add(evenfact,dots[(i+1)/2]);
+			  else 
+			    Add(evenfact,squares[i/2]);
+			  fi;
+		    elif (i mod 2) <> (pair[1] mod 2) then
+			  if (i mod 2) = 1 then 
+				Add(oddfact,dots[(i+1)/2]);
+			  else 
+				Add(oddfact,squares[i/2]);
+			  fi;
+		    fi;
+	      od;
+		  Append(botfact,evenfact);
+		  Append(botfact,oddfact);
+		elif pair[1] < -pair[2] then
+		  for i in [pair[1]..-pair[2]-1] do
+		    if (i mod 2) = (pair[1] mod 2) then
+			  if (i mod 2) = 1 then 
+				Add(evenfact,dots[(i+1)/2]);
+			  else 
+				Add(evenfact,squares[i/2]);
+			  fi;
+		    elif (i mod 2) <> (pair[1] mod 2) then
+			  if (i mod 2) = 1 then 
+		        Add(oddfact,dots[(i+1)/2]);
+			  else 
+				Add(oddfact,squares[i/2]);
+			  fi;
+		    fi;
+	      od;
+		  Append(topfact,evenfact);
+		  Append(topfact,oddfact);
+		fi;
+	  fi;
+	else
+	  oddfact := [];
+	  evenfact := [];
+	  for i in [-pair[1]..-pair[2]-1] do
+		if (i mod 2) = (-pair[1] mod 2) then
+		  if (i mod 2) = 1 then 
+			Add(evenfact,dots[(i+1)/2]);
+		  else 
+			Add(evenfact,squares[i/2]);
+		  fi;
+		elif (i mod 2) <> (-pair[1] mod 2) then
+		  if (i mod 2) = 1 then 
+		    Add(oddfact,dots[(i+1)/2]);
+		  else 
+			Add(oddfact,squares[i/2]);
+		  fi;
+		fi;
+	  od;
+	  Append(botfactors,evenfact);
+	  Append(botfactors,oddfact);
+	fi;
+  od;
+  factors := Reversed(factors);
+  Append(factors,Reversed(topfact));
+  Append(factors,botfact);
+  Append(factors,botfactors);
+  t2 := Runtime();
+  Add(times,t2-t1);
+  od;
+  return Float(Sum(times)/runs);
+end;
+
+############################################################
+
+#Symmetric group
+
+#setting up Fenwick Tree
+FenwickTree := function(n)
+  return rec(n := n, bit := List([1..n], i -> 0));
+end;
+
+FenwickAdd := function(F, idx, delta)
+  while idx <= F.n do
+    F.bit[idx] := F.bit[idx] + delta;
+    idx := idx + 2^(Valuation(idx,2));
+  od;
+end;
+
+FenwickSum := function(F, idx)
+  local s;
+  s := 0;
+  while idx > 0 do
+    s := s + F.bit[idx];
+    idx := idx - 2^(Valuation(idx,2));
+  od;
+  return s;
+end;
+
+#factor permutation in its one-line form
+PermFact := function(g)
+  local n,p,posOfValue,F,x,pos,rank,word,j;
+  n := LargestMovedPoint(g);
+  if n = 0 then
+    return [];
+  fi;
+  p := List([1..n], i -> i^g);
+
+  # position of each value in one-line notation
+  posOfValue := List([1..n], i -> 0);
+  for pos in [1..n] do
+    posOfValue[p[pos]] := pos;
+  od;
+
+  #Fenwick tree initially contains all positions
+  F := FenwickTree(n);
+  for pos in [1..n] do
+    FenwickAdd(F, pos, 1);
+  od;
+
+  word := [];
+  for x in Reversed([1..n]) do
+    pos := posOfValue[x];
+    rank := FenwickSum(F, pos);
+    for j in [rank .. x-1] do
+	  Add(word, j);
+    od;
+    FenwickAdd(F, pos, -1);
+  od;
+  return Reversed(word);
+end;
+
+#convert bipartition form to one-line permutation form
+BipartitionToPerm := function(bipartition,n)
+  local p,block;
+  p := List([1..n], i -> 0);
+  for block in bipartition do
+    p[block[1]] := -block[2];
+  od;
+  return PermList(p);
+end;
+
+SymFact := function(bipartition)
+  local i,word,factors,syms,n;
+  n := DegreeOfBipartition(bipartition);
+  syms := []*(n-1);
+  for i in [1..(n-1)] do
+	syms[i] := SymGenerator(n,i);
+  od;
+  word := PermFact(BipartitionToPerm(ExtRepOfObj(bipartition),n));
+  factors := [];
+  for i in word do
+    Add(factors,syms[i]);
+  od;
+  return Reversed(factors);
+end;
+
+SymRandom := function(n)
+  local images,i,j,temp,blocks;
+  #Fisher-Yates shuffle of [1..n]
+  images := [1..n];
+  for i in Reversed([2..n]) do
+    j := Random(1, i);
+    temp := images[i];
+    images[i] := images[j];
+    images[j] := temp;
+  od;
+  # The permutation i -> images[i] corresponds to the blocks [i, -images[i]].
+  blocks := List([1..n], i -> [i, -images[i]]);
+  return Bipartition(blocks);
+end;
+
+TimeSymFact := function(n,runs)
+  local syms,i,word,bipartition,a,times,t1,t2,factors;
+  syms := []*(n-1);
+  for i in [1..(n-1)] do
+	syms[i] := SymGenerator(n,i);
+  od;
+  
+  times := [];
+  for a in [1..runs] do 
+  t1 := Runtime();
+  bipartition := SymRandom(n);
+  word := PermFact(BipartitionToPerm(ExtRepOfObj(bipartition),n));
+  factors := [];
+  for i in word do
+    Add(factors,syms[i]);
+  od;
+  factors := Reversed(factors);
+  t2 := Runtime();
+  Add(times,t2-t1);
+  od;
+  return Float(Sum(times)/runs);
+end;
+
+############################################################
+
+#Brauer 
+
+BrFact := function(bipartition)
+  local factors,k,blocks,n,pair,topexpect,topobtain,botexpect,botobtain,topsym,botsym,word,facttopsym,factbotsym,s,tmp,i,j,topobtaincup,botobtaincap,topexpectcup,botexpectcap;
+  n := DegreeOfBipartition(bipartition);
+  blocks := List(ExtRepOfObj(bipartition));
+  
+  #find number of through strands k
+  topexpect := [];
+  botexpect := [];
+  topexpectcup := [];
+  botexpectcap := [];
+  k := 0;
+  for pair in blocks do
+	if pair[1]*pair[2] < 0 then 
+	  k := k + 1;
+	  Add(topexpect,[pair[1]]);
+	  Add(botexpect,[pair[2]]);
+	elif pair[1] > 0 and pair[2] > 0 then
+	  Add(topexpectcup,pair);
+	else
+	  Add(botexpectcap,pair);
+	fi;
+  od;
+  
+  factors := [];
+  topobtaincup := [];
+  botobtaincap := [];
+  #place (n-k)/2 cup generators
+  for i in [1..(n-k)] do
+    if (i mod 2) = 1 then
+      Add(factors,CupGenerator(n,i));
+	  Add(topobtaincup,[i,i+1]);
+	  Add(botobtaincap,[-i,-i-1]);
+	fi;
+  od;
+  topobtain := [];
+  botobtain := [];
+  for i in [(n-k+1)..n] do
+    Add(topobtain,[i]);
+	Add(botobtain,[-i]);
+  od;
+  
+  #arrange top,bot
+  topsym := [];
+  botsym := [];
+  for i in [1..Size(topexpectcup)] do
+    Add(topsym,[topexpectcup[i][1],-topobtaincup[i][1]]);
+	Add(topsym,[topexpectcup[i][2],-topobtaincup[i][2]]);
+  od;
+  for i in [1..Size(topexpect)] do
+    Add(topsym,[topexpect[i][1],-topobtain[i][1]]);
+  od;
+  for i in [1..Size(botexpectcap)] do
+    Add(botsym,[botexpectcap[i][1],-botobtaincap[i][1]]);
+	Add(botsym,[botexpectcap[i][2],-botobtaincap[i][2]]);
+  od;
+  for i in [1..Size(botexpect)] do
+    Add(botsym,[botexpect[i][1],-botobtain[i][1]]);
+  od;
+  topsym := Bipartition(topsym);
+  botsym := Bipartition(botsym);
+  
+  facttopsym := [];
+  word := PermFact(BipartitionToPerm(ExtRepOfObj(topsym),n));
+  for i in word do
+    Add(facttopsym,SymGenerator(n,i));
+  od;
+  facttopsym := Reversed(facttopsym);
+  factbotsym := [];
+  word := PermFact(BipartitionToPerm(ExtRepOfObj(botsym),n));
+  for i in word do
+    Add(factbotsym,SymGenerator(n,i));
+  od;
+  factbotsym := Reversed(factbotsym);
+  
+  Append(facttopsym,factors);
+  Append(facttopsym,factbotsym);
+  return facttopsym;
+end;
+
+BrRandom := function(n)
+    local points, N, i, j, tmp, blocks;
+
+    if not IsInt(n) or n < 1 then
+        Error("n must be a positive integer");
+    fi;
+
+    points := Concatenation([1 .. n], [-1, -2 .. -n]);
+    N := 2 * n;
+
+    # Fisher-Yates shuffle
+    for i in [N, N - 1 .. 2] do
+        j := Random([1 .. i]);
+
+        tmp := points[i];
+        points[i] := points[j];
+        points[j] := tmp;
+    od;
+
+    # Pair consecutive points
+    blocks := List(
+        [1 .. n],
+        i -> [points[2 * i - 1], points[2 * i]]
+    );
+  return Bipartition(blocks);
+end;
+
+TimeBrFact := function(n,runs)
+  local factors,k,blocks,pair,topexpect,topobtain,botexpect,botobtain,topsym,botsym,word,facttopsym,factbotsym,s,tmp,i,j,topobtaincup,botobtaincap,topexpectcup,botexpectcap,a,t1,t2,times,bipartition,cups,syms;
+  syms := []*(n-1);
+  cups := []*(n-1);
+  for i in [1..(n-1)] do
+    syms[i] := SymGenerator(n,i);
+    cups[i] := CupGenerator(n,i);
+  od;
+  
+  times := [];
+  for a in [1..runs] do
+  bipartition := BrRandom(n);
+  t1 := Runtime();
+  blocks := List(ExtRepOfObj(bipartition));
+  
+  #find number of through strands k
+  topexpect := [];
+  botexpect := [];
+  topexpectcup := [];
+  botexpectcap := [];
+  k := 0;
+  for pair in blocks do
+	if pair[1]*pair[2] < 0 then 
+	  k := k + 1;
+	  Add(topexpect,[pair[1]]);
+	  Add(botexpect,[pair[2]]);
+	elif pair[1] > 0 and pair[2] > 0 then
+	  Add(topexpectcup,pair);
+	else
+	  Add(botexpectcap,pair);
+	fi;
+  od;
+  
+  factors := [];
+  topobtaincup := [];
+  botobtaincap := [];
+  #place (n-k)/2 cup generators
+  for i in [1..(n-k)] do
+    if (i mod 2) = 1 then
+      Add(factors,cups[i]);
+	  Add(topobtaincup,[i,i+1]);
+	  Add(botobtaincap,[-i,-i-1]);
+	fi;
+  od;
+  topobtain := [];
+  botobtain := [];
+  for i in [(n-k+1)..n] do
+    Add(topobtain,[i]);
+	Add(botobtain,[-i]);
+  od;
+  
+  #arrange top,bot -> symmetric group 
+  topsym := [];
+  botsym := [];
+  for i in [1..Size(topexpectcup)] do
+    Add(topsym,[topexpectcup[i][1],-topobtaincup[i][1]]);
+	Add(topsym,[topexpectcup[i][2],-topobtaincup[i][2]]);
+  od;
+  for i in [1..Size(topexpect)] do
+    Add(topsym,[topexpect[i][1],-topobtain[i][1]]);
+  od;
+  for i in [1..Size(botexpectcap)] do
+    Add(botsym,[botexpectcap[i][1],-botobtaincap[i][1]]);
+	Add(botsym,[botexpectcap[i][2],-botobtaincap[i][2]]);
+  od;
+  for i in [1..Size(botexpect)] do
+    Add(botsym,[botexpect[i][1],-botobtain[i][1]]);
+  od;
+  topsym := Bipartition(topsym);
+  botsym := Bipartition(botsym);
+  
+  facttopsym := [];
+  word := PermFact(BipartitionToPerm(ExtRepOfObj(topsym),n));
+  for i in word do
+    Add(facttopsym,syms[i]);
+  od;
+  facttopsym := Reversed(facttopsym);
+  factbotsym := [];
+  word := PermFact(BipartitionToPerm(ExtRepOfObj(botsym),n));
+  for i in word do
+    Add(factbotsym,syms[i]);
+  od;
+  factbotsym := Reversed(factbotsym);
+  Append(facttopsym,factors);
+  Append(facttopsym,factbotsym);
+  t2 := Runtime();
+  Add(times,t2-t1);
+  od;
+  return Float(Sum(times)/runs);
+end;
+
+############################################################
+
+#Rook 
+RoMonoid := function(n)
+  local gens;
+  gens := [];
+  Append(gens,List([1..(n-1)],i->DotGenerator(n,[i])));
+  Append(gens,List([1..(n-1)],i->SymGenerator(n,i)));
+  return Monoid(gens);
+end;
+
+RoFact := function(bipartition)
+  local factors,k,blocks,n,pair,topexpect,topobtain,botexpect,botobtain,word,topsym,botsym,facttopsym,factbotsym,s,tmp,i,j,topfactors,botfactors,topdotexpect,botdotexpect,topobtaindot,botobtaindot;
+  blocks := List(ExtRepOfObj(bipartition));
+  n := DegreeOfBipartition(bipartition);
+  blocks := List(ExtRepOfObj(bipartition));
+  topexpect := [];
+  botexpect := [];
+  topdotexpect := [];
+  botdotexpect := [];
+  for pair in blocks do
+    if Size(pair) = 1 then
+	  if pair[1] > 0 then
+	    Add(topdotexpect,pair);
+	  else 
+	    Add(botdotexpect,pair);
+	  fi;
+	else
+	  Add(topexpect,[pair[1]]);
+	  Add(botexpect,[pair[2]]);
+	fi;
+  od;
+
+  topfactors := [];
+  topobtain := [];
+  topobtaindot := [];
+  for i in [1..Size(topdotexpect)] do
+    Add(topfactors,DotGenerator(n,[i]));
+	Add(topobtaindot,[i]);
+  od;
+  for i in [Size(topdotexpect)+1..n] do
+    Add(topobtain,[i]);
+  od;
+
+  botfactors := [];
+  botobtain := [];
+  botobtaindot := [];
+  for i in [1..Size(botdotexpect)] do
+    Add(botfactors,DotGenerator(n,[i]));
+	Add(botobtaindot,[-i]);
+  od;
+  for i in [Size(botdotexpect)+1..n] do
+    Add(botobtain,[-i]);
+  od;
+
+  topsym := [];
+  botsym := [];
+  for i in [1..Size(topdotexpect)] do
+    Add(topsym,[topdotexpect[i][1],-topobtaindot[i][1]]);
+  od;
+  for i in [1..Size(topexpect)] do
+    Add(topsym,[topexpect[i][1],-topobtain[i][1]]);
+  od;
+  for i in [1..Size(botdotexpect)] do
+    Add(botsym,[botdotexpect[i][1],-botobtaindot[i][1]]);
+  od;
+  for i in [1..Size(botexpect)] do
+    Add(botsym,[botexpect[i][1],-botobtain[i][1]]);
+  od;
+  
+  topsym := Bipartition(topsym);
+  botsym := Bipartition(botsym);
+  facttopsym := [];
+  word := PermFact(BipartitionToPerm(ExtRepOfObj(topsym),n));
+  for i in word do
+    Add(facttopsym,SymGenerator(n,i));
+  od;
+  facttopsym := Reversed(facttopsym);
+  factbotsym := [];
+  word := PermFact(BipartitionToPerm(ExtRepOfObj(botsym),n));
+  for i in word do
+    Add(factbotsym,SymGenerator(n,i));
+  od;
+  factbotsym := Reversed(factbotsym);
+  Append(facttopsym,topfactors);
+  Append(facttopsym,botfactors);
+  Append(facttopsym,factbotsym);
+  return facttopsym;
+end;
+
+#similar to planar rook case
+RoRandomk := function(n)
+  local weights,total,term,k,r,cumulative;
+  weights := [1];
+  total := 1;
+  term := 1;
+  for k in [0 .. n - 1] do
+    term := term * (n - k)^2 / (k + 1);
+    Add(weights, term);
+    total := total + term;
+  od;
+  r := Random(1, total);
+  cumulative := 0;
+  for k in [0 .. n] do
+    cumulative := cumulative + weights[k + 1];
+    if r <= cumulative then
+      return k;
+    fi;
+  od;
+end;
+
+RoRandom := function(n)
+  local k,domain,image,blocks,usedTop,usedBottom,i,ShuffleList;
+  k := RoRandomk(n);
+  domain := [1 .. n];
+  image := [1 .. n];
+  
+  #Fisher-Yates shuffle
+  ShuffleList := function(list)
+    local i, j, tmp;
+    for i in [1 .. Size(list) - 1] do
+      j := Random(i, Size(list));
+      tmp := list[i];
+      list[i] := list[j];
+      list[j] := tmp;
+    od;
+	return list;
+  end;
+	
+  ShuffleList(domain);
+  ShuffleList(image);
+  usedTop := domain{[1 .. k]};
+  usedBottom := image{[1 .. k]};
+  blocks := [];
+
+  #transversal blocks, encoding the partial bijection
+  for i in [1 .. k] do
+    Add(blocks, [usedTop[i], -usedBottom[i]]);
+  od;
+
+  #top vertices outside the domain.
+  for i in [1 .. n] do
+    if not i in usedTop then
+      Add(blocks, [i]);
+    fi;
+  od;
+
+    #bottom vertices outside the image.
+  for i in [1 .. n] do
+    if not i in usedBottom then
+      Add(blocks, [-i]);
+    fi;
+  od;
+  return Bipartition(blocks);
+end;
+
+TimeRoFact := function(n,runs)
+  local factors,k,blocks,pair,topexpect,topobtain,botexpect,botobtain,word,topsym,botsym,facttopsym,factbotsym,s,tmp,i,j,topfactors,botfactors,topdotexpect,botdotexpect,topobtaindot,botobtaindot,a,t1,t2,times,bipartition,dots,syms;
+  syms := []*(n-1);
+  dots := []*n;
+  for i in [1..(n-1)] do
+    syms[i] := SymGenerator(n,i);
+    dots[i] := DotGenerator(n,[i]);
+  od;
+  dots[n] := DotGenerator(n,[n]);
+  
+  times := [];
+  for a in [1..runs] do
+  bipartition := RoRandom(n);
+  t1 := Runtime();
+  blocks := List(ExtRepOfObj(bipartition));
+  topexpect := [];
+  botexpect := [];
+  topdotexpect := [];
+  botdotexpect := [];
+  for pair in blocks do
+    if Size(pair) = 1 then
+	  if pair[1] > 0 then
+	    Add(topdotexpect,pair);
+	  else 
+	    Add(botdotexpect,pair);
+	  fi;
+	else
+	  Add(topexpect,[pair[1]]);
+	  Add(botexpect,[pair[2]]);
+	fi;
+  od;
+
+  topfactors := [];
+  topobtain := [];
+  topobtaindot := [];
+  for i in [1..Size(topdotexpect)] do
+    Add(topfactors,dots[i]);
+	Add(topobtaindot,[i]);
+  od;
+  for i in [Size(topdotexpect)+1..n] do
+    Add(topobtain,[i]);
+  od;
+
+  botfactors := [];
+  botobtain := [];
+  botobtaindot := [];
+  for i in [1..Size(botdotexpect)] do
+    Add(botfactors,dots[i]);
+	Add(botobtaindot,[-i]);
+  od;
+  for i in [Size(botdotexpect)+1..n] do
+    Add(botobtain,[-i]);
+  od;
+
+  topsym := [];
+  botsym := [];
+  for i in [1..Size(topdotexpect)] do
+    Add(topsym,[topdotexpect[i][1],-topobtaindot[i][1]]);
+  od;
+  for i in [1..Size(topexpect)] do
+    Add(topsym,[topexpect[i][1],-topobtain[i][1]]);
+  od;
+  for i in [1..Size(botdotexpect)] do
+    Add(botsym,[botdotexpect[i][1],-botobtaindot[i][1]]);
+  od;
+  for i in [1..Size(botexpect)] do
+    Add(botsym,[botexpect[i][1],-botobtain[i][1]]);
+  od;
+  
+  topsym := Bipartition(topsym);
+  botsym := Bipartition(botsym);
+  facttopsym := [];
+  word := PermFact(BipartitionToPerm(ExtRepOfObj(topsym),n));
+  for i in word do
+    Add(facttopsym,syms[i]);
+  od;
+  facttopsym := Reversed(facttopsym);
+  factbotsym := [];
+  word := PermFact(BipartitionToPerm(ExtRepOfObj(botsym),n));
+  for i in word do
+    Add(factbotsym,syms[i]);
+  od;
+  factbotsym := Reversed(factbotsym);
+  Append(facttopsym,topfactors);
+  Append(facttopsym,botfactors);
+  Append(facttopsym,factbotsym);
+  t2 := Runtime();
+  Add(times,t2-t1);
+  od;
+  return Float(Sum(times)/runs);
+end;
+
+############################################################
+
+#Rook-Brauer
+RoBrFact := function(bipartition)
+  local factors,k,blocks,n,id,pair,topexpect,topobtain,botexpect,botobtain,topsym,word,botsym,facttopsym,factbotsym,s,tmp,i,j,topfactors,botfactors,cupexpect,capexpect,topdotexpect,botdotexpect,cupobtain,capobtain,topobtaindot,botobtaindot;
+  n := DegreeOfBipartition(bipartition);
+  blocks := List(ExtRepOfObj(bipartition));
+  topexpect := [];
+  botexpect := [];
+  cupexpect := [];
+  capexpect := [];
+  topdotexpect := [];
+  botdotexpect := [];
+  for pair in blocks do
+    if Size(pair) = 1 then
+	  if pair[1] > 0 then
+	    Add(topdotexpect,pair);
+	  else 
+	    Add(botdotexpect,pair);
+	  fi;
+	elif pair[2] > 0 then
+	  Add(cupexpect,pair);
+	elif pair[1] < 0 then
+	  Add(capexpect,pair);
+	else
+	  Add(topexpect,[pair[1]]);
+	  Add(botexpect,[pair[2]]);
+	fi;
+  od;
+
+  topfactors := [];
+  topobtain := [];
+  topobtaindot := [];
+  cupobtain := [];
+  for i in [1..Size(cupexpect)*2] do
+    if (i mod 2) = 1 then
+      Add(topfactors,CupGenerator(n,i));
+	  Add(cupobtain,[i,i+1]);
+	fi;
+  od;
+  for i in [2*Size(cupexpect)+1..2*Size(cupexpect)+Size(topdotexpect)] do
+    Add(topfactors,DotGenerator(n,[i]));
+	Add(topobtaindot,[i]);
+  od;
+  for i in [2*Size(cupexpect)+Size(topdotexpect)+1..n] do
+    Add(topobtain,[i]);
+  od;
+
+  botfactors := [];
+  botobtain := [];
+  capobtain := [];
+  botobtaindot := [];
+  for i in [1..Size(capexpect)*2] do
+    if (i mod 2) = 1 then
+      Add(botfactors,CupGenerator(n,i));
+	  Add(capobtain,[-i,-i-1]);
+	fi;
+  od;
+  for i in [2*Size(capexpect)+1..2*Size(capexpect)+Size(botdotexpect)] do
+    Add(botfactors,DotGenerator(n,[i]));
+	Add(botobtaindot,[-i]);
+  od;
+  for i in [2*Size(capexpect)+Size(botdotexpect)+1..n] do
+    Add(botobtain,[-i]);
+  od;
+
+  topsym := [];
+  botsym := [];
+  for i in [1..Size(cupexpect)] do
+    Add(topsym,[cupexpect[i][1],-cupobtain[i][1]]);
+	Add(topsym,[cupexpect[i][2],-cupobtain[i][2]]);
+  od;
+  for i in [1..Size(topdotexpect)] do
+    Add(topsym,[topdotexpect[i][1],-topobtaindot[i][1]]);
+  od;
+  for i in [1..Size(topexpect)] do
+    Add(topsym,[topexpect[i][1],-topobtain[i][1]]);
+  od;
+  for i in [1..Size(capexpect)] do
+    Add(botsym,[capexpect[i][1],-capobtain[i][1]]);
+	Add(botsym,[capexpect[i][2],-capobtain[i][2]]);
+  od;
+  for i in [1..Size(botdotexpect)] do
+    Add(botsym,[botdotexpect[i][1],-botobtaindot[i][1]]);
+  od;
+  for i in [1..Size(botexpect)] do
+    Add(botsym,[botexpect[i][1],-botobtain[i][1]]);
+  od;
+  
+  topsym := Bipartition(topsym);
+  botsym := Bipartition(botsym);
+  facttopsym := [];
+  word := PermFact(BipartitionToPerm(ExtRepOfObj(topsym),n));
+  for i in word do
+    Add(facttopsym,SymGenerator(n,i));
+  od;
+  facttopsym := Reversed(facttopsym);
+  factbotsym := [];
+  word := PermFact(BipartitionToPerm(ExtRepOfObj(botsym),n));
+  for i in word do
+    Add(factbotsym,SymGenerator(n,i));
+  od;
+  factbotsym := Reversed(factbotsym);
+  Append(facttopsym,topfactors);
+  Append(facttopsym,botfactors);
+  Append(facttopsym,factbotsym);
+  return facttopsym;
+end;
+
+RoBrRandom := function(n)
+  local N,telephone,points,blocks,m,i,r,j,x,y;
+  N := 2 * n;
+
+  #telephone[m + 1] is the number I_m of partitions of m labelled points into singleton and pair blocks
+  #I_0 = I_1 = 1,
+  #I_m = I_(m-1) + (m-1) I_(m-2).
+  telephone := [1, 1];
+  for m in [2 .. N] do
+    Add(telephone,telephone[m]+(m-1)*telephone[m-1]);
+  od;
+  
+  points := Concatenation([1 .. n],List([1 .. n], i -> -i));
+  blocks := [];
+  m := N;
+  while m > 0 do
+    x := points[m];
+    if m = 1 then
+      Add(blocks, [x]);
+      m := 0;
+    else
+      r := Random(1, telephone[m + 1]);
+	  if r <= telephone[m] then
+	    Add(blocks, [x]);
+		m := m - 1;
+	  else
+	    j := Random(1, m - 1);
+		y := points[j];
+		Add(blocks, [x, y]);
+		points[j] := points[m - 1];
+		m := m - 2;
+      fi;
+    fi;
+  od;
+  return Bipartition(blocks);
+end;
+
+TimeRoBrFact := function(n,runs)
+  local factors,k,blocks,id,pair,topexpect,topobtain,botexpect,botobtain,topsym,word,botsym,facttopsym,factbotsym,s,tmp,i,j,topfactors,botfactors,cupexpect,capexpect,topdotexpect,botdotexpect,cupobtain,capobtain,topobtaindot,botobtaindot,a,t1,t2,times,bipartition,dots,syms,cups;
+  syms := []*(n-1);
+  cups := []*(n-1);
+  dots := []*n;
+  for i in [1..(n-1)] do
+    syms[i] := SymGenerator(n,i);
+    cups[i] := CupGenerator(n,i);
+    dots[i] := DotGenerator(n,[i]);
+  od;
+  dots[n] := DotGenerator(n,[n]);
+
+  times := [];
+  for a in [1..runs] do
+  bipartition := RoBrRandom(n);
+  t1 := Runtime();
+  blocks := List(ExtRepOfObj(bipartition));
+  topexpect := [];
+  botexpect := [];
+  cupexpect := [];
+  capexpect := [];
+  topdotexpect := [];
+  botdotexpect := [];
+  for pair in blocks do
+    if Size(pair) = 1 then
+	  if pair[1] > 0 then
+	    Add(topdotexpect,pair);
+	  else 
+	    Add(botdotexpect,pair);
+	  fi;
+	elif pair[2] > 0 then
+	  Add(cupexpect,pair);
+	elif pair[1] < 0 then
+	  Add(capexpect,pair);
+	else
+	  Add(topexpect,[pair[1]]);
+	  Add(botexpect,[pair[2]]);
+	fi;
+  od;
+
+  topfactors := [];
+  topobtain := [];
+  topobtaindot := [];
+  cupobtain := [];
+  for i in [1..Size(cupexpect)*2] do
+    if (i mod 2) = 1 then
+      Add(topfactors,cups[i]);
+	  Add(cupobtain,[i,i+1]);
+	fi;
+  od;
+  for i in [2*Size(cupexpect)+1..2*Size(cupexpect)+Size(topdotexpect)] do
+    Add(topfactors,dots[i]);
+	Add(topobtaindot,[i]);
+  od;
+  for i in [2*Size(cupexpect)+Size(topdotexpect)+1..n] do
+    Add(topobtain,[i]);
+  od;
+
+  botfactors := [];
+  botobtain := [];
+  capobtain := [];
+  botobtaindot := [];
+  for i in [1..Size(capexpect)*2] do
+    if (i mod 2) = 1 then
+      Add(botfactors,cups[i]);
+	  Add(capobtain,[-i,-i-1]);
+	fi;
+  od;
+  for i in [2*Size(capexpect)+1..2*Size(capexpect)+Size(botdotexpect)] do
+    Add(botfactors,dots[i]);
+	Add(botobtaindot,[-i]);
+  od;
+  for i in [2*Size(capexpect)+Size(botdotexpect)+1..n] do
+    Add(botobtain,[-i]);
+  od;
+
+  topsym := [];
+  botsym := [];
+  for i in [1..Size(cupexpect)] do
+    Add(topsym,[cupexpect[i][1],-cupobtain[i][1]]);
+	Add(topsym,[cupexpect[i][2],-cupobtain[i][2]]);
+  od;
+  for i in [1..Size(topdotexpect)] do
+    Add(topsym,[topdotexpect[i][1],-topobtaindot[i][1]]);
+  od;
+  for i in [1..Size(topexpect)] do
+    Add(topsym,[topexpect[i][1],-topobtain[i][1]]);
+  od;
+  for i in [1..Size(capexpect)] do
+    Add(botsym,[capexpect[i][1],-capobtain[i][1]]);
+	Add(botsym,[capexpect[i][2],-capobtain[i][2]]);
+  od;
+  for i in [1..Size(botdotexpect)] do
+    Add(botsym,[botdotexpect[i][1],-botobtaindot[i][1]]);
+  od;
+  for i in [1..Size(botexpect)] do
+    Add(botsym,[botexpect[i][1],-botobtain[i][1]]);
+  od;
+  
+  topsym := Bipartition(topsym);
+  botsym := Bipartition(botsym);
+  facttopsym := [];
+  word := PermFact(BipartitionToPerm(ExtRepOfObj(topsym),n));
+  for i in word do
+    Add(facttopsym,syms[i]);
+  od;
+  facttopsym := Reversed(facttopsym);
+  factbotsym := [];
+  word := PermFact(BipartitionToPerm(ExtRepOfObj(botsym),n));
+  for i in word do
+    Add(factbotsym,syms[i]);
+  od;
+  factbotsym := Reversed(factbotsym);
+  Append(facttopsym,topfactors);
+  Append(facttopsym,botfactors);
+  Append(facttopsym,factbotsym);
+  t2 := Runtime();
+  Add(times,t2-t1);
+  od;
+  return Float(Sum(times)/runs);
+end;
+
+############################################################
+
+#Partition 
+PaFact := function(bipartition)
+  local n,dots,syms,squares,i,j,blocks,block,topreq,botreq,listtop,word,listbot,factors,counter,topfactors,botfactors,topprod,botprod,midfactors,botsym,flatbotprod,flatbotreq,flattopprod,flattopreq,topsym,topbotprod,bottopprod,fact,factbotsym,facttopsym,s,tmp;
+  blocks := List(ExtRepOfObj(bipartition));
+  n := DegreeOfBipartition(bipartition);
+
+  topreq := [];
+  botreq := [];
+  for block in blocks do
+    listtop := [];
+	listbot := [];
+	for i in block do
+	  if i > 0
+	    then Add(listtop,i);
+	  else Add(listbot,i);
+	  fi;
+	od;
+	Add(topreq,listtop);
+	Add(botreq,listbot);
+  od;
+  
+  counter := 1;
+  topfactors := [];
+  topprod := [];
+  bottopprod := [];
+  for block in topreq do
+    Add(bottopprod,[(counter)..(counter-1+Size(block))]);
+    if not IsEmpty(block) then
+	  if Size(block) = 1 then
+		Add(topprod,[counter]);
+		counter := counter + Size(block);
+      else
+		for i in [(counter)..(counter-2+Size(block))] do
+		  Add(topfactors,SquareGenerator(n,i,i+1));
+		od;
+	    Add(topprod,[(counter)..(counter-1+Size(block))]);
+	    counter := counter + Size(block);
+	  fi;
+	fi;
+  od;
+  counter := 1;
+  botfactors := [];
+  botprod := [];
+  topbotprod := [];
+  for block in botreq do
+    Add(topbotprod,[(counter)..(counter-1+Size(block))]);
+    if not IsEmpty(block) then
+	  if Size(block) = 1 then
+		Add(botprod,[-counter]);
+		counter := counter + Size(block);
+      else 
+	    for i in [(counter)..(counter-2+Size(block))] do
+		  Add(botfactors,SquareGenerator(n,i,i+1));
+		od;
+	    Add(botprod,-[(counter)..(counter-1+Size(block))]);
+	    counter := counter + Size(block);
+	  fi;
+	fi;
+  od;
+
+  flattopprod := Flat(topprod);
+  flattopreq := Flat(topreq);
+  topsym := [];
+  flatbotprod := Flat(botprod);
+  flatbotreq := Flat(botreq);
+  botsym := [];
+  for i in [1..n] do
+	Add(topsym,[-flattopprod[i],flattopreq[i]]);
+	Add(botsym,[-flatbotprod[i],flatbotreq[i]]); 
+  od;
+
+  topsym := Bipartition(topsym);
+  botsym := Bipartition(botsym);
+  facttopsym := [];
+  word := PermFact(BipartitionToPerm(ExtRepOfObj(topsym),n));
+  for i in word do
+    Add(facttopsym,SymGenerator(n,i));
+  od;
+  facttopsym := Reversed(facttopsym);
+  factbotsym := [];
+  word := PermFact(BipartitionToPerm(ExtRepOfObj(botsym),n));
+  for i in word do
+    Add(factbotsym,SymGenerator(n,i));
+  od;
+  factbotsym := Reversed(factbotsym);
+  
+  midfactors := [];
+  for i in [1..Size(blocks)] do
+    if IsEmpty(topbotprod[i]) and IsEmpty(bottopprod[i]) 
+	  then continue;
+	elif IsEmpty(topbotprod[i]) then
+	  fact := [];
+	  for j in [1..Size(bottopprod[i])] do
+	    Add(fact,[bottopprod[i][j]]);
+	  od;
+	  Append(midfactors,fact);
+	elif IsEmpty(bottopprod[i]) then
+	  fact := [];
+	  for j in [1..Size(topbotprod[i])] do
+	    Add(fact,[-topbotprod[i][j]]);
+	  od;
+	  Append(midfactors,fact);
+    elif Size(topbotprod[i]) = Size(bottopprod[i]) then
+	  fact := [];
+	  Add(fact,[-topbotprod[i][1],bottopprod[i][1]]);
+	  for j in [2..Size(topbotprod[i])] do
+		Add(fact,[-topbotprod[i][j]]);
+		Add(fact,[bottopprod[i][j]]);
+	  od;
+	  Append(midfactors,fact);
+	elif Size(topbotprod[i]) < Size(bottopprod[i]) then
+	  fact := [];
+	  Add(fact,[-topbotprod[i][1],bottopprod[i][1]]);
+	  for j in [2..Size(topbotprod[i])] do
+		Add(fact,[-topbotprod[i][j]]);
+		Add(fact,[bottopprod[i][j]]);
+	  od;
+	  for j in [Size(topbotprod[i])+1..Size(bottopprod[i])] do 
+		Add(fact,[bottopprod[i][j]]);
+	  od;
+	  Append(midfactors,fact);
+	elif Size(topbotprod[i]) > Size(bottopprod[i]) then
+	  fact := [];
+	  Add(fact,[-topbotprod[i][1],bottopprod[i][1]]);
+	  for j in [2..Size(bottopprod[i])] do
+		Add(fact,[-topbotprod[i][j]]);
+		Add(fact,[bottopprod[i][j]]);
+	  od;
+	  for j in [Size(bottopprod[i])+1..Size(topbotprod[i])] do
+		Add(fact,[-topbotprod[i][j]]);
+	  od;
+	  Append(midfactors,fact);
+	fi;
+  od;
+  midfactors := pRoFact(Bipartition(midfactors));
+  
+  factors := [];
+  Append(factors,facttopsym);
+  Append(factors,topfactors);
+  Append(factors,midfactors);
+  Append(factors,botfactors);
+  Append(factors,factbotsym);
+  return factors;
+end;
+
+PaRandom := function(n)
+  local points,N,B,m,s,weights,chosen,remaining,tail,block,restblocks,ShuffleList,RandomWeightedPosition;
+  points := Concatenation([1 .. n], [-n .. -1]);
+  N := Size(points);
+
+  #Bell numbers B[m + 1] = Bell(m)
+  B := List([0 .. N], x -> 0);
+  B[1] := 1;   # Bell(0)
+  for m in [1 .. N] do
+    B[m + 1] := Sum([0 .. m-1],s -> Binomial(m-1,s)*B[s+1]);
+  od;
+  
+  #Fisher-Yates shuffle
+  ShuffleList := function(list)
+    local i, j, tmp;
+    for i in [1 .. Size(list) - 1] do
+      j := Random(i, Size(list));
+      tmp := list[i];
+      list[i] := list[j];
+      list[j] := tmp;
+    od;
+	return list;
+  end;
+  
+  # Return i with probability weights[i] / Sum(weights).
+  RandomWeightedPosition := function(weights)
+    local total,r,i;
+	total := Sum(weights);
+	r := Random(1,total);
+	for i in [1 .. Size(weights)] do
+	  if r <= weights[i] then
+	    return i;
+	  fi;
+      r := r - weights[i];
+    od;
+  end;
+  
+  #recursive worker
+  chosen := function(L)
+    local len, blocksize, localweights, shuffled, C, R, result;
+    len := Size(L);
+	if len = 0 then
+      return [];
+	fi;
+
+    #weight for block size s is Binomial(len-1,s-1)*Bell(len-s)
+	localweights := List([1 .. len],blocksize ->Binomial(len-1,blocksize-1)*B[len-blocksize+1]);
+    blocksize := RandomWeightedPosition(localweights);
+
+    shuffled := ShallowCopy(L{[2 .. len]});
+    shuffled := ShuffleList(shuffled);
+	C := Concatenation([L[1]],shuffled{[1 .. blocksize - 1]});
+	R := shuffled{[blocksize .. Size(shuffled)]};
+
+    result := chosen(R);
+    Add(result, C, 1);
+
+    return result;
+  end;
+
+  return Bipartition(chosen(ShallowCopy(points)));
+end;
+
+TimePaFact := function(n,runs)
+  local i,j,blocks,pair,block,topreq,botreq,listtop,word,listbot,factors,counter,topfactors,botfactors,topprod,botprod,midfactors,botsym,flatbotprod,flatbotreq,flattopprod,flattopreq,topsym,topbotprod,bottopprod,fact,factbotsym,facttopsym,s,tmp,factorsMid,topfactMid,botfactMid,topfactorsMid,botfactorsMid,blocksMid,midfactorsMid,oddfact,a,t1,t2,times,bipartition,dots,syms,squares;
+  syms := []*(n-1);
+  squares := []*(n-1);
+  dots := []*n;
+  for i in [1..(n-1)] do
+    squares[i] := SquareGenerator(n,i,i+1);
+    syms[i] := SymGenerator(n,i);
+    dots[i] := DotGenerator(n,[i]);
+  od;
+  dots[n] := DotGenerator(n,[n]);
+  
+  times := [];
+  for a in [1..runs] do
+  bipartition := PaRandom(n);
+  t1 := Runtime();
+  blocks := List(ExtRepOfObj(bipartition));
+  topreq := [];
+  botreq := [];
+  for block in blocks do
+    listtop := [];
+	listbot := [];
+	for i in block do
+	  if i > 0
+	    then Add(listtop,i);
+	  else Add(listbot,i);
+	  fi;
+	od;
+	Add(topreq,listtop);
+	Add(botreq,listbot);
+  od;
+  
+  counter := 1;
+  topfactors := [];
+  topprod := [];
+  bottopprod := [];
+  for block in topreq do
+    Add(bottopprod,[(counter)..(counter-1+Size(block))]);
+    if not IsEmpty(block) then
+	  if Size(block) = 1 then
+		Add(topprod,[counter]);
+		counter := counter + Size(block);
+      else
+		for i in [(counter)..(counter-2+Size(block))] do
+		  Add(topfactors,squares[i]);
+		od;
+	    Add(topprod,[(counter)..(counter-1+Size(block))]);
+	    counter := counter + Size(block);
+	  fi;
+	fi;
+  od;
+  counter := 1;
+  botfactors := [];
+  botprod := [];
+  topbotprod := [];
+  for block in botreq do
+    Add(topbotprod,[(counter)..(counter-1+Size(block))]);
+    if not IsEmpty(block) then
+	  if Size(block) = 1 then
+		Add(botprod,[-counter]);
+		counter := counter + Size(block);
+      else 
+	    for i in [(counter)..(counter-2+Size(block))] do
+		  Add(botfactors,squares[i]);
+		od;
+	    Add(botprod,-[(counter)..(counter-1+Size(block))]);
+	    counter := counter + Size(block);
+	  fi;
+	fi;
+  od;
+
+  flattopprod := Flat(topprod);
+  flattopreq := Flat(topreq);
+  topsym := [];
+  flatbotprod := Flat(botprod);
+  flatbotreq := Flat(botreq);
+  botsym := [];
+  for i in [1..n] do
+	Add(topsym,[-flattopprod[i],flattopreq[i]]);
+	Add(botsym,[-flatbotprod[i],flatbotreq[i]]); 
+  od;
+  topsym := Bipartition(topsym);
+  botsym := Bipartition(botsym);
+  
+  facttopsym := [];
+  word := PermFact(BipartitionToPerm(ExtRepOfObj(topsym),n));
+  for i in word do
+    Add(facttopsym,syms[i]);
+  od;
+  facttopsym := Reversed(facttopsym);
+  factbotsym := [];
+  word := PermFact(BipartitionToPerm(ExtRepOfObj(botsym),n));
+  for i in word do
+    Add(factbotsym,syms[i]);
+  od;
+  factbotsym := Reversed(factbotsym);
+
+  midfactors := [];
+  for i in [1..Size(blocks)] do
+    if IsEmpty(topbotprod[i]) and IsEmpty(bottopprod[i]) 
+	  then continue;
+	elif IsEmpty(topbotprod[i]) then
+	  fact := [];
+	  for j in [1..Size(bottopprod[i])] do
+	    Add(fact,[bottopprod[i][j]]);
+	  od;
+	  Append(midfactors,fact);
+	elif IsEmpty(bottopprod[i]) then
+	  fact := [];
+	  for j in [1..Size(topbotprod[i])] do
+	    Add(fact,[-topbotprod[i][j]]);
+	  od;
+	  Append(midfactors,fact);
+    elif Size(topbotprod[i]) = Size(bottopprod[i]) then
+	  fact := [];
+	  for j in [1..Size(topbotprod[i])] do
+	    Add(fact,[-topbotprod[i][j],bottopprod[i][j]]);
+	  od;
+	  Append(midfactors,fact);
+	elif Size(topbotprod[i]) < Size(bottopprod[i]) then
+	  fact := [];
+	  for j in [1..Size(topbotprod[i])] do
+		Add(fact,[-topbotprod[i][j],bottopprod[i][j]]);
+	  od;
+	  for j in [Size(topbotprod[i])+1..Size(bottopprod[i])] do 
+		Add(fact,[bottopprod[i][j]]);
+	  od;
+	  Append(midfactors,fact);
+	elif Size(topbotprod[i]) > Size(bottopprod[i]) then
+	  fact := [];
+	  for j in [1..Size(bottopprod[i])] do
+		Add(fact,[-topbotprod[i][j],bottopprod[i][j]]);
+	  od;
+	  for j in [Size(bottopprod[i])+1..Size(topbotprod[i])] do
+		Add(fact,[-topbotprod[i][j]]);
+	  od;
+	  Append(midfactors,fact);
+	fi;
+  od;
+  midfactors := Bipartition(midfactors);
+  blocksMid := List(ExtRepOfObj(midfactors));
+  factorsMid := [];
+  midfactorsMid := [];
+  topfactMid := [];
+  botfactMid := [];
+  botfactorsMid := [];
+  for pair in blocksMid do
+    if Size(pair) = 1 then 
+	  if pair[1] > 0 then
+		Add(factorsMid,dots[pair[1]]);
+	  else 
+		Add(botfactorsMid,dots[-pair[1]]);
+	  fi;
+	else
+	  if pair[1] <> -pair[2] then
+		oddfact := [];
+		if pair[1] > -pair[2] then
+	      for i in [-pair[2]..pair[1]-1] do
+		    Add(oddfact,syms[i]);
+		    Add(oddfact,dots[i]);
+	      od;
+		  Append(botfactMid,Reversed(oddfact));
+		elif pair[1] < -pair[2] then
+		  for i in [pair[1]..-pair[2]-1] do
+		    Add(oddfact,dots[i]);
+		    Add(oddfact,syms[i]);
+	      od;
+		  Append(topfactMid,Reversed(oddfact));
+		fi;
+	  fi;
+	fi;
+  od;
+  Append(factorsMid,Reversed(topfactMid));
+  Append(factorsMid,botfactMid);
+  Append(factorsMid,botfactorsMid);
+
+  factors := [];
+  Append(factors,facttopsym);
+  Append(factors,topfactors);
+  Append(factors,factorsMid);
+  Append(factors,botfactors);
+  Append(factors,factbotsym);
+  t2 := Runtime();
+  Add(times,t2-t1);
+  od;
+  return Float(Sum(times)/runs);
+end;
